@@ -18,7 +18,7 @@
 
 1. **Clone 本專案**
    ```bash
-   git clone https://github.com/YourOrg/kubernetes-log-analysis.git
+   git clone https://github.com/ap-mic-inc/kubernetes-log-analysis
    cd kubernetes-log-analysis
    ```
 

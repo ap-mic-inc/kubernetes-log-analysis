@@ -4,8 +4,6 @@ from dotenv import load_dotenv
 # Load environment variables from .env file in the current working directory
 # or the directory of this script if .env is placed alongside the package.
 # For k-log, it's better to load .env from where k-log is run.
-# dotenv_path = os.path.join(os.getcwd(), '.env')
-# load_dotenv(dotenv_path=dotenv_path)
 load_dotenv() # Loads .env from CWD or parent directories.
 
 # LiteLLM uses GOOGLE_API_KEY for Gemini models

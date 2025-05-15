@@ -1,4 +1,3 @@
-import os
 from litellm import completion
 from typing import Dict, Optional
 from . import config # For API key and model configuration
@@ -25,6 +24,7 @@ def analyze_logs_with_llm(query: str, log_data: Dict[str, str], user_namespace: 
         "If you see error messages from the log collection process itself (e.g., 'kubectl command failed'), "
         "mention that these indicate issues with data gathering for certain aspects. "
         "The user's query is in Chinese(zh-TW), please respond in Chinese(zh-TW)."
+        "Please use plain text to present the content, and avoid using code blocks or markdown formatting. "
     )
 
     context_data_str = "\n\n--- Collected Diagnostic Information ---\n"
@@ -50,12 +50,6 @@ def analyze_logs_with_llm(query: str, log_data: Dict[str, str], user_namespace: 
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_prompt_content}
     ]
-    
-    # Explicitly set the API key in the environment for LiteLLM to pick up.
-    # For Gemini, LiteLLM expects GOOGLE_API_KEY. Our config.GEMINI_API_KEY reads this.
-    if config.GEMINI_API_KEY:
-        os.environ["GOOGLE_API_KEY"] = config.GEMINI_API_KEY
-        print(f"DEBUG: Explicitly set os.environ['GOOGLE_API_KEY'] to: {os.environ.get('GOOGLE_API_KEY')[:5]}... (masked)") # 印出部分金鑰以確認
 
     try:
         print(f"Sending request to LLM model: {config.LLM_MODEL}. This may take a moment...")

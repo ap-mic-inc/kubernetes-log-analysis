@@ -8,11 +8,31 @@
 set -euo pipefail # Exit on error (-e), undefined variable (-u), or pipe failure (-o pipefail)
 
 # ------------------------------------------------------------
+# 預設參數 (Default Parameters)
+# ------------------------------------------------------------
+DEFAULT_NAMESPACE="default"
+DEFAULT_OUTDIR_BASE="k8s-debug"
+
+# ------------------------------------------------------------
+# 參數解析 (Parameter Parsing)
+# ------------------------------------------------------------
+NAMESPACE="${DEFAULT_NAMESPACE}"
+OUTDIR_BASE="${DEFAULT_OUTDIR_BASE}"
+
+while getopts ":n:o:" opt; do
+  case ${opt} in
+    n ) NAMESPACE=$OPTARG ;;
+    o ) OUTDIR_BASE=$OPTARG ;;
+    \? ) echo "用法: $0 [-n namespace] [-o output_directory_base_name]" >&2; exit 1 ;;
+  esac
+done
+shift $((OPTIND -1))
+
+# ------------------------------------------------------------
 # 參數設定 (Parameter Settings)
 # ------------------------------------------------------------
-NAMESPACE="default"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
-OUTDIR="./result/k8s-debug-${NAMESPACE}-${TIMESTAMP}"
+OUTDIR="./result/${OUTDIR_BASE}-${NAMESPACE}-${TIMESTAMP}"
 ARCHIVE="${OUTDIR}.tar.gz"
 
 mkdir -p "${OUTDIR}"
@@ -31,7 +51,43 @@ function dump() {
   ${cmd} > "${OUTDIR}/${name}.txt" 2>&1 \
     || echo "!! ${name} 收集失敗 (Command: ${cmd})" >> "${OUTDIR}/errors.log"
 }
-
+# ------------------------------------------------------------
+# 函式：詳細描述資源 (Function: Detailed Describe Resource)
+# $1: resource_type - The type of resource (e.g., "pod", "deployment")
+# $2: namespace     - The namespace
+# ------------------------------------------------------------
+function describe_resource() {
+  local resource_type="$1"
+  local namespace="$2"
+  local output_dir="${OUTDIR}/describe-${resource_type}s"
+  mkdir -p "${output_dir}"
+  echo ">> 開始對 ${namespace} namespace 中每個 ${resource_type} 分別執行 describe ..."
+  # Use --ignore-not-found to prevent script from failing if resource type doesn't exist in namespace
+  for name in $(kubectl get "${resource_type}" -n "${namespace}" -o jsonpath='{.items[*].metadata.name}' --ignore-not-found); do
+    echo "   - 描述 ${resource_type}: ${name}"
+    kubectl describe "${resource_type}" "${name}" -n "${namespace}" \
+      > "${output_dir}/${resource_type}-${name}.txt" 2>&1 \
+      || echo "!! describe 失敗: ${resource_type} ${name} in ${namespace}" >> "${OUTDIR}/errors.log"
+  done
+}
+# ------------------------------------------------------------
+# 函式：收集 Pod 日誌 (Function: Collect Pod Logs)
+# $1: namespace - The namespace
+# ------------------------------------------------------------
+function collect_pod_logs() {
+  local namespace="$1"
+  local output_dir="${OUTDIR}/logs/${namespace}"
+  mkdir -p "${output_dir}"
+  echo ">> 開始收集 Pod 日誌 (namespace=${namespace}) ..."
+  # Use --ignore-not-found to prevent script from failing if no pods are found
+  for pod in $(kubectl get pods -n "${namespace}" -o jsonpath='{.items[*].metadata.name}' --ignore-not-found); do
+    echo "   - 收集中 Pod: ${pod} 的日誌..."
+    # Collect logs from all containers in the pod (--all-containers), with timestamps (--timestamps)
+    kubectl logs -n "${namespace}" "${pod}" --all-containers --timestamps \
+      > "${output_dir}/${pod}.log" 2>&1 \
+      || echo "!! 日誌收集失敗: ${namespace}/${pod}" >> "${OUTDIR}/errors.log"
+  done
+}
 echo "=== Kubernetes 除錯資訊匯出 (Namespace: ${NAMESPACE}；輸出目錄: ${OUTDIR}) ==="
 # errors.log will be created if any command fails and will contain details of failed commands.
 
@@ -84,124 +140,29 @@ dump "storageclasses"     "kubectl get storageclass -o wide" # List all StorageC
 # 詳細 Describe：Nodes
 # ------------------------------------------------------------
 dump "describe-nodes"     "kubectl describe nodes"
+# Note: describe nodes is cluster-scoped, not namespace-specific
 
 # ------------------------------------------------------------
 # 詳細 Describe：Namespace ${NAMESPACE} 中的資源 (各自成檔)
 # (Detailed Describe: Resources in Namespace ${NAMESPACE} - each in a separate file)
 # ------------------------------------------------------------
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 Pod 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-pods"
-# Loop through each Pod name (extracted using jsonpath) in the target namespace
-for pod in $(kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 Pod: ${pod}"
-  kubectl describe pod "${pod}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-pods/pod-${pod}.txt" 2>&1 \
-    || echo "!! describe 失敗: Pod ${pod} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 Deployment 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-deployments"
-# Loop through each Deployment name in the target namespace
-for deploy in $(kubectl get deployment -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 Deployment: ${deploy}"
-  kubectl describe deployment "${deploy}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-deployments/deployment-${deploy}.txt" 2>&1 \
-    || echo "!! describe 失敗: Deployment ${deploy} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 StatefulSet 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-statefulsets"
-# Loop through each StatefulSet name in the target namespace
-for sts in $(kubectl get statefulset -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 StatefulSet: ${sts}"
-  kubectl describe statefulset "${sts}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-statefulsets/statefulset-${sts}.txt" 2>&1 \
-    || echo "!! describe 失敗: StatefulSet ${sts} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 DaemonSet 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-daemonsets"
-# Loop through each DaemonSet name in the target namespace
-for ds in $(kubectl get daemonset -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 DaemonSet: ${ds}"
-  kubectl describe daemonset "${ds}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-daemonsets/daemonset-${ds}.txt" 2>&1 \
-    || echo "!! describe 失敗: DaemonSet ${ds} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 Service 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-services"
-# Loop through each Service name in the target namespace
-for svc in $(kubectl get service -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 Service: ${svc}"
-  kubectl describe service "${svc}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-services/service-${svc}.txt" 2>&1 \
-    || echo "!! describe 失敗: Service ${svc} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
+describe_resource "pod" "${NAMESPACE}"
+describe_resource "deployment" "${NAMESPACE}"
+describe_resource "statefulset" "${NAMESPACE}"
+describe_resource "daemonset" "${NAMESPACE}"
+describe_resource "service" "${NAMESPACE}"
 
 dump "ingresses-list" "kubectl get ingress -n ${NAMESPACE} -o wide" # 新增 Ingress 列表
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 Ingress 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-ingresses"
-# Loop through each Ingress name in the target namespace
-for ing in $(kubectl get ingress -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 Ingress: ${ing}"
-  kubectl describe ingress "${ing}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-ingresses/ingress-${ing}.txt" 2>&1 \
-    || echo "!! describe 失敗: Ingress ${ing} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
+describe_resource "ingress" "${NAMESPACE}"
 
 dump "networkpolicies-list" "kubectl get networkpolicy -n ${NAMESPACE} -o wide" # 新增 NetworkPolicy 列表
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 NetworkPolicy 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-networkpolicies"
-# Loop through each NetworkPolicy name in the target namespace
-for np in $(kubectl get networkpolicy -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 NetworkPolicy: ${np}"
-  kubectl describe networkpolicy "${np}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-networkpolicies/networkpolicy-${np}.txt" 2>&1 \
-    || echo "!! describe 失敗: NetworkPolicy ${np} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
+describe_resource "networkpolicy" "${NAMESPACE}"
 
 dump "hpa-list" "kubectl get hpa -n ${NAMESPACE} -o wide" # 新增 HPA 列表
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 HorizontalPodAutoscaler 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-hpas"
-# Loop through each HPA name in the target namespace
-for hpa in $(kubectl get hpa -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 HPA: ${hpa}"
-  kubectl describe hpa "${hpa}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-hpas/hpa-${hpa}.txt" 2>&1 \
-    || echo "!! describe 失敗: HPA ${hpa} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 ConfigMap 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-configmaps"
-# Loop through each ConfigMap name in the target namespace
-for cm in $(kubectl get configmap -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 ConfigMap: ${cm}"
-  kubectl describe configmap "${cm}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-configmaps/configmap-${cm}.txt" 2>&1 \
-    || echo "!! describe 失敗: ConfigMap ${cm} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 Secret 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-secrets"
-# Loop through each Secret name in the target namespace
-for secret in $(kubectl get secret -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 Secret: ${secret}"
-  # 'describe secret' shows metadata, creation timestamp, type, and data keys (not values)
-  kubectl describe secret "${secret}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-secrets/secret-${secret}.txt" 2>&1 \
-    || echo "!! describe 失敗: Secret ${secret} in ${NAMESPACE}" >> "${OUTDIR}/errors.log"
-done
-
-echo ">> 開始對 ${NAMESPACE} namespace 中每個 PersistentVolumeClaim 分別執行 describe ..."
-mkdir -p "${OUTDIR}/describe-pvcs"
-# Loop through each PVC name in the target namespace
-for pvc_name in $(kubectl get pvc -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 描述 PVC: ${pvc_name}"
-  kubectl describe pvc "${pvc_name}" -n "${NAMESPACE}" \
-    > "${OUTDIR}/describe-pvcs/pvc-${pvc_name}.txt" 2>&1 \
-    || echo "!! describe 失敗: PVC ${pvc_name}" >> "${OUTDIR}/errors.log"
-done
+describe_resource "hpa" "${NAMESPACE}"
+describe_resource "configmap" "${NAMESPACE}"
+describe_resource "secret" "${NAMESPACE}"
+describe_resource "pvc" "${NAMESPACE}"
 
 echo ">> 開始對每個 StorageClass 分別執行 describe ..."
 mkdir -p "${OUTDIR}/describe-storageclasses"
@@ -217,17 +178,7 @@ done
 # 事件與日誌
 # ------------------------------------------------------------
 dump "events"             "kubectl get events -n ${NAMESPACE} --sort-by=.metadata.creationTimestamp" # Get all events in the namespace, sorted by creation time
-
-echo ">> 開始收集 Pod 日誌 (namespace=${NAMESPACE}) ..."
-mkdir -p "${OUTDIR}/logs/${NAMESPACE}"
-# Loop through each Pod name in the target namespace to collect logs
-for pod in $(kubectl get pods -n "${NAMESPACE}" -o jsonpath='{.items[*].metadata.name}'); do
-  echo "   - 收集中 Pod: ${pod} 的日誌..."
-  # Collect logs from all containers in the pod (--all-containers), with timestamps (--timestamps)
-  kubectl logs -n "${NAMESPACE}" "${pod}" --all-containers --timestamps \
-    > "${OUTDIR}/logs/${NAMESPACE}/${pod}.log" 2>&1 \
-    || echo "!! 日誌收集失敗: ${NAMESPACE}/${pod}" >> "${OUTDIR}/errors.log"
-done
+collect_pod_logs "${NAMESPACE}"
 
 # ------------------------------------------------------------
 # Namespace RBAC 資訊

@@ -1,7 +1,7 @@
 import click
 import os
 from .analyzer import analyze_logs_with_llm
-from .file_finder import find_relevant_files, determine_query_type_and_resource, find_relevant_files_with_llm, QUERY_TO_FILE_MAP
+from .file_finder import determine_query_type_and_resource, find_relevant_files_with_llm, QUERY_TO_FILE_MAP
 from . import config # To check API key presence and get default dir pattern
 
 @click.command()
@@ -41,7 +41,10 @@ def main_cli(log_dir: str, query_parts: tuple):
 
 
     click.echo(f"Analyzing logs in: {abs_log_dir}")
-    click.echo(f"Your query: {user_query}")
+    click.echo(click.style("\n🔍 Your query:", bold=True, fg="green"))
+    click.echo("--------------------------------------------------")
+    click.echo(f"{user_query}")
+    click.echo("--------------------------------------------------")
     
     # We'll still run this to get a potential namespace or for fallback error messages,
     # but we won't exit early if query_type is None.
