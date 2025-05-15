@@ -10,23 +10,22 @@ setup(
     install_requires=[
         "litellm>=1.34.0",
         "click>=8.0",
-        "python-dotenv>=1.0.0",
-        "google-generativeai" # For Gemini, used by LiteLLM
+        "python-dotenv>=1.0.0"
     ],
     entry_points={
         "console_scripts": [
             "k-log=kubernetes_log_analysis.cli:main_cli",
         ],
     },
-    author="Your Name / APMIC", # Feel free to change
-    author_email="your.email@example.com", # Feel free to change
-    description="A tool to analyze Kubernetes log bundles using LLMs via LiteLLM.",
+    author="Simon Liu / APMIC",
+    author_email="simonliuyuwei@gmail.com",
+    description="A tool to analyze Kubernetes log bundles using LLMs.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/kubernetes-log-analysis", # Optional: Replace with your repo URL
+    url="https://github.com/ap-mic-inc/kubernetes-log-analysis",
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License", # Or your preferred license
+        "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Topic :: System :: Logging",
         "Topic :: Software Development :: Libraries :: Python Modules",
